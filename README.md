@@ -7,10 +7,22 @@ import/export.
 
 > ⚠️ Early WIP. Not affiliated with Cosmic Byte. For hardware you own.
 
-## Status
+## Features
 
-Pre-build. See [`docs/research.md`](docs/research.md) for the device, protocol, and
-approach research.
+- **RGB effect** — pick any of the 7 firmware presets. (The firmware has no custom
+  colour/brightness — [proven](docs/protocol.md), not a limitation of this app.)
+- **DPI** — six fully editable stage values (100–10,000), plus the active stage.
+- **Polling rate** — 125 / 250 / 500 / 1000 Hz.
+- **Scroll direction** — normal / reversed.
+- **Profiles** — export the current config to JSON and import it back.
+- **Developer tools** — a raw 64-byte packet sender + reply viewer for further
+  reverse-engineering.
+
+Decoded but **not yet implemented** (need more reverse-engineering): button
+remapping and macros — see [`docs/protocol.md`](docs/protocol.md).
+
+See [`docs/research.md`](docs/research.md) for background and
+[`docs/protocol.md`](docs/protocol.md) for the byte-level protocol map.
 
 ## Requirements
 

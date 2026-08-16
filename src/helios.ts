@@ -66,6 +66,60 @@ export function parseHexBytes(text: string): number[] {
   });
 }
 
+// ---- Mouse settings: DPI stages, active stage, polling, scroll (command 0x0f) ----
+
+/** Polling rates, mapping the firmware code (byte 10) to Hz. */
+export const POLLING_RATES = [
+  { hz: 125, code: 1 },
+  { hz: 250, code: 2 },
+  { hz: 500, code: 3 },
+  { hz: 1000, code: 4 },
+] as const;
+
+export interface Settings {
+  dpi: number[]; // 6 stage values, e.g. [800, 1600, ...]
+  activeStage: number; // 1..6 — which stage is current
+  pollingCode: number; // 1..4 — see POLLING_RATES
+  scrollReversed: boolean; // byte 48
+}
+
+/** Factory defaults, captured from the device. */
+export const DEFAULT_SETTINGS: Settings = {
+  dpi: [800, 1600, 2400, 3200, 6400, 10000],
+  activeStage: 6,
+  pollingCode: 4,
+  scrollReversed: false,
+};
+
+/**
+ * Build the mouse-settings packet (command 0x0f). Header/trailer are the fixed
+ * bytes captured from Orbit (no checksum, so replaying them is safe); we only
+ * fill the fields we control. See docs/protocol.md.
+ *
+ * NOTE: byte 10 (polling) vs byte 12 (active stage) is our best read of the
+ * captures — verify on-device and swap if reversed.
+ */
+export function buildSettings(s: Settings): Uint8Array<ArrayBuffer> {
+  const p = new Uint8Array(PACKET_SIZE);
+  p.set([0x55, 0x0f, 0xae, 0x0a, 0x2f, 0x01, 0x01, 0x01, 0x00, 0x01], 0); // fixed header
+  p[10] = s.pollingCode; // 1..4
+  p[11] = 0x06; // stage count (6)
+  p[12] = s.activeStage; // 1..6
+  for (let i = 0; i < 6; i++) {
+    const dpi = s.dpi[i] ?? 0;
+    p[13 + i * 2] = dpi & 0xff; // low byte (little-endian)
+    p[14 + i * 2] = (dpi >> 8) & 0xff; // high byte
+  }
+  p[48] = s.scrollReversed ? 1 : 0;
+  p.set([0xff, 0x01, 0x0a, 0xff, 0xff], 49); // fixed trailer
+  return p;
+}
+
+/** Write DPI / polling / active-stage / scroll to the mouse in one packet. */
+export async function applySettings(device: HIDDevice, s: Settings): Promise<void> {
+  await device.sendReport(0, buildSettings(s));
+}
+
 // Dev-only self-checks: encoders/parsers must match known-good values. These fire
 // a console.assert in the browser dev console if the logic ever drifts.
 if ((import.meta as any).env?.DEV) {
@@ -76,4 +130,10 @@ if ((import.meta as any).env?.DEV) {
     JSON.stringify(parseHexBytes("55 21 0a ff")) === JSON.stringify([0x55, 0x21, 0x0a, 0xff]),
     "helios: parseHexBytes not implemented yet (see TODO)",
   );
+  const capSettings =
+    "55 0f ae 0a 2f 01 01 01 00 01 04 06 06 20 03 40 06 60 09 80 0c 00 19 10 27" +
+    " 00".repeat(24) +
+    " ff 01 0a ff ff" +
+    " 00".repeat(10);
+  console.assert(hex(buildSettings(DEFAULT_SETTINGS)) === capSettings, "helios: buildSettings mismatch");
 }
