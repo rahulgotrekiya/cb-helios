@@ -8,14 +8,38 @@
  */
 
 export async function requestHelios(): Promise<HIDDevice | null> {
-  // Empty filter => the chooser lists every HID device Chrome will expose.
-  // Chrome hides plain mouse/keyboard interfaces for security, but the Helios's
-  // vendor-defined config interface will still appear — that's the one we want.
-  const devices = await navigator.hid.requestDevice({ filters: [] });
-  const device = devices[0];
+  // Broad filter: both known Helios vendor IDs, any usage page. The config
+  // interface enumerates differently in wired vs dongle mode, so we let it show
+  // in every mode, then confirm the right interface via findConfigCollection().
+  const devices = await navigator.hid.requestDevice({
+    filters: [
+      { vendorId: 0xa8a4, usagePage: 0xff01 }, // wired: only the config channel shows
+      { vendorId: 0xa8a5 }, // dongle: still exploring which interface is config
+    ],
+  });
+  // If the chooser returned several interfaces, prefer the real config channel.
+  const device = devices.find((d) => findConfigCollection(d)) ?? devices[0] ?? null;
   if (!device) return null;
-  if (!device.opened) await device.open();
+  // ONLY open the config interface. Opening the composite input interface would
+  // claim the mouse's keyboard/button HID from the OS and freeze the mouse.
+  if (findConfigCollection(device) && !device.opened) {
+    await device.open();
+  }
   return device;
+}
+
+/**
+ * Find the vendor config collection that carries our command channel: a vendor
+ * usage page (>= 0xff00) whose OUTPUT report is the unnumbered report (id 0) —
+ * the exact report Orbit sends on. Other vendor interfaces (e.g. 0xff06 with
+ * output report id 11) are decoys we must NOT open or write to.
+ */
+export function findConfigCollection(device: HIDDevice): HIDCollectionInfo | null {
+  for (const col of device.collections) {
+    if ((col.usagePage ?? 0) < 0xff00) continue;
+    if (col.outputReports?.some((r) => (r.reportId ?? 0) === 0)) return col;
+  }
+  return null;
 }
 
 const hex = (n: number) => "0x" + n.toString(16).padStart(4, "0");
