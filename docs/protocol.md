@@ -70,10 +70,15 @@ device via WebHID introspection and by sniffing `HIDDevice.sendReport` in Orbit'
 | 4 | `0x03` | constant — likely a fixed brightness/speed Orbit doesn't expose |
 | **10** | **[FX] effect id** | `0`=wave, `1`=neon, `2`=touring flash, `3`=yoyo ball, `4`=unidirectional flashing, `5`=circular breathing, `6`=off |
 
-Orbit sends **no color and no brightness** — only the effect id. Whether the firmware
-honors custom color/brightness in the spare/zero bytes (incl. byte 4) is an **open
-probe** — see "Custom RGB" in open questions. This is the key lever for the
-"more customization than Orbit" goal.
+Orbit sends **no color and no brightness** — only the effect id.
+
+**Probe result (2026-08-16): the firmware ignores everything but the effect id.**
+Sweeping byte 4 (`00`/`01`/`08`/`ff`) and injecting RGB triples at bytes 5–7 and
+11–13 produced **no visible change** — only changing byte 10 changed anything.
+Conclusion: **custom color and brightness are NOT supported** by this hardware; the
+`0x21` command selects one of the fixed animated presets and nothing more. Do not
+ship color/brightness UI for RGB. (Open sub-question: whether effect ids 7–9 expose
+any *bonus* presets beyond Orbit's 0–6.)
 
 ## Decoded: button / key mapping — write `0x09` (read `0x08`)
 

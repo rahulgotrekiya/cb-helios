@@ -1,11 +1,14 @@
 import { requestHelios, describeDevice, findConfigCollection } from "./hid";
-import { LIGHT_EFFECTS, setLightEffect } from "./helios";
+import { LIGHT_EFFECTS, setLightEffect, sendRaw, parseHexBytes } from "./helios";
 
-const output = document.querySelector<HTMLPreElement>("#output")!;
-const connectBtn = document.querySelector<HTMLButtonElement>("#connect")!;
-const effectSelect = document.querySelector<HTMLSelectElement>("#effect")!;
+const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+const output = $<HTMLPreElement>("#output");
+const replies = $<HTMLPreElement>("#replies");
+const connectBtn = $<HTMLButtonElement>("#connect");
+const effectSelect = $<HTMLSelectElement>("#effect");
+const raw = $<HTMLInputElement>("#raw");
+const sendBtn = $<HTMLButtonElement>("#send");
 
-// Keep the connected device so the effect dropdown can send to it.
 let device: HIDDevice | null = null;
 
 // Fill the dropdown from the protocol's effect list (index = firmware effect id).
@@ -15,6 +18,13 @@ LIGHT_EFFECTS.forEach((name, id) => {
   opt.textContent = name;
   effectSelect.append(opt);
 });
+
+const hexOf = (data: DataView) =>
+  [...new Uint8Array(data.buffer)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+function enableControls(on: boolean) {
+  for (const el of [effectSelect, raw, sendBtn]) el.disabled = !on;
+}
 
 connectBtn.addEventListener("click", async () => {
   if (!("hid" in navigator)) {
@@ -30,9 +40,13 @@ connectBtn.addEventListener("click", async () => {
     }
     output.textContent = describeDevice(device);
     if (findConfigCollection(device)) {
-      effectSelect.disabled = false; // this interface has the command channel
+      enableControls(true);
+      // Show whatever the mouse sends back (replies to read commands, etc.).
+      device.addEventListener("inputreport", (e) => {
+        replies.textContent = `id=${e.reportId}  ${hexOf(e.data)}`;
+      });
     } else {
-      effectSelect.disabled = true;
+      enableControls(false);
       output.textContent +=
         "\n\n⚠ No 64-byte command channel on this interface. Disconnect, reconnect, and pick a different Helios entry.";
     }
@@ -47,6 +61,19 @@ effectSelect.addEventListener("change", async () => {
   try {
     await setLightEffect(device, effectId);
     output.textContent = `Set effect: ${LIGHT_EFFECTS[effectId]}`;
+  } catch (err) {
+    output.textContent = `Error: ${(err as Error).message}`;
+  }
+});
+
+sendBtn.addEventListener("click", async () => {
+  if (!device) return;
+  try {
+    const bytes = parseHexBytes(raw.value);
+    await sendRaw(device, bytes);
+    output.textContent = `Sent ${bytes.length} bytes: ${bytes
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(" ")}`;
   } catch (err) {
     output.textContent = `Error: ${(err as Error).message}`;
   }

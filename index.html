@@ -20,7 +20,15 @@
       <select id="effect" disabled></select>
     </p>
 
+    <p>
+      <label for="raw">Raw packet (hex):</label>
+      <input id="raw" type="text" size="60"
+             placeholder="55 21 00 00 03 00 00 00 00 00 01" disabled />
+      <button id="send" disabled>Send</button>
+    </p>
+
     <pre id="output">Not connected.</pre>
+    <pre id="replies">Replies from mouse will appear here.</pre>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
