@@ -47,6 +47,36 @@ payload (no leading report-ID byte).
 - **App tip:** filter `requestDevice` to `{ vendorId: 0xa8a4, usagePage: 0xff01 }` so
   users land on the right interface automatically instead of guessing in the chooser.
 
+## Decoded: packet framing
+
+- Every packet is 64 bytes on `reportId 0`. **Byte 0 = `0x55`** (magic/start), all packets.
+- **Byte 1 = command id.** Seen so far: `0x0f` = write DPI config; `0x0e` = a
+  read/status request (constant `55 0e 01 0b 30 00…`) Orbit sends right before each write.
+- **Checksum: not yet determined.** Across DPI *active-stage* changes, byte 2 (`0xae`)
+  stayed constant even though byte 10 changed — so either there's no checksum, or it
+  doesn't cover that byte. Confirm by capturing a change to a DPI *value* (below).
+
+## Decoded: DPI configuration — command `0x0f`
+
+Captured template (64 bytes, `reportId 0`):
+```
+55 0f ae 0a 2f 01 01 01 00 01 [AS] [NS] 02 <6× DPI LE16> 00…00 ff 01 0a ff ff 00…
+```
+| offset | field | notes |
+|---|---|---|
+| 0 | `0x55` | magic |
+| 1 | `0x0f` | command = write DPI config |
+| 2–9 | `ae 0a 2f 01 01 01 00 01` | fixed header (checksum/length? TBD) |
+| **10** | **[AS] active DPI stage** | 1-based; observed 1–4 |
+| **11** | **[NS] stage count** | `0x06` = 6 stages |
+| 12 | `0x02` | unknown (per-stage flag?) |
+| **13–24** | **6 × DPI, little-endian uint16** | `800,1600,2400,3200,6400,10000` |
+| 49–53 | `ff 01 0a ff ff` | unknown trailer (lift-off? terminator?) |
+
+**Actionable now:** set the active DPI stage by replaying this exact template with
+byte 10 changed — no checksum math needed since the rest is byte-identical to a
+known-good Orbit packet.
+
 ## Open questions (milestone 2 targets)
 
 - Byte layout inside the 64-byte packet: byte 0 = command id? length? checksum/CRC?
@@ -72,3 +102,7 @@ payload (no leading report-ID byte).
   64-byte input+output reports at `reportId 0`. Confirmed VID/PID `a8a4`/`2255`,
   controller YJX-CHIP. WebHID connect working on NixOS after a `GROUP="users"` udev
   rule (`uaccess` from `99-local.rules` was too late to apply).
+- **2026-08-16** — Decoded DPI command `0x0f` by sniffing `HIDDevice.sendReport` in
+  Orbit's tab. DPI stages are 6× little-endian uint16 (800/1600/2400/3200/6400/10000);
+  byte 10 = active stage, byte 11 = stage count. Packet framing: 64B, byte 0 `0x55`,
+  byte 1 = command id (`0x0f` write DPI, `0x0e` read/status). Checksum still unknown.
