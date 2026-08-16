@@ -45,7 +45,18 @@ export interface ReportSummary {
  * is the first map we need to reverse-engineer the protocol.
  */
 export function summarizeReports(reports: HIDReportInfo[]): ReportSummary[] {
-  return []; // replace with your implementation
+  return reports.map((report) => {
+    let bits = 0;
+    for (const item of report.items ?? []) {
+      // TODO(human): add this item's contribution to `bits`.
+      // Each item is a run of fields: (reportSize) bits per field, (reportCount)
+      // fields. So its contribution is reportSize * reportCount bits.
+      // Use (item.reportSize ?? 0) and (item.reportCount ?? 0) to handle undefined.
+      bits += (item.reportSize ?? 0) * (item.reportCount ?? 0);
+
+    }
+    return { reportId: report.reportId ?? 0, byteLength: bits / 8 };
+  });
 }
 
 export function describeDevice(device: HIDDevice): string {
