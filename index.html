@@ -5,30 +5,72 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>cb-helios — Configurator</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+      body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.4rem; }
+      fieldset { border: 1px solid #ccc; border-radius: 8px; margin: 1rem 0; padding: 0.75rem 1rem; }
+      fieldset:disabled { opacity: 0.5; }
+      legend { font-weight: 600; padding: 0 0.4rem; }
+      label { display: inline-block; }
       pre { background: #f4f4f5; padding: 1rem; border-radius: 8px; overflow-x: auto; }
-      button { font-size: 1rem; padding: 0.5rem 1rem; cursor: pointer; }
+      button { font-size: 1rem; padding: 0.4rem 0.9rem; cursor: pointer; }
+      input.dpi { width: 5.5rem; }
+      .row { margin: 0.4rem 0; }
+      small { color: #666; }
     </style>
   </head>
   <body>
     <h1>Cosmic Byte Helios — Configurator</h1>
-    <p>Open in desktop Chrome/Edge/Brave, plug in the mouse or 2.4GHz dongle, then connect.</p>
+    <p>Open in desktop Chrome/Edge/Brave, connect the mouse <strong>wired</strong>, then Connect.</p>
     <button id="connect">Connect mouse</button>
 
-    <p>
-      <label for="effect">RGB effect:</label>
-      <select id="effect" disabled></select>
-    </p>
+    <fieldset id="rgbControls" disabled>
+      <legend>RGB effect</legend>
+      <label for="effect">Effect:</label>
+      <select id="effect"></select>
+      <div class="row"><small>Firmware supports 7 preset effects only — no custom colour or brightness.</small></div>
+    </fieldset>
 
-    <p>
-      <label for="raw">Raw packet (hex):</label>
-      <input id="raw" type="text" size="60"
-             placeholder="55 21 00 00 03 00 00 00 00 00 01" disabled />
-      <button id="send" disabled>Send</button>
-    </p>
+    <fieldset id="dpiControls" disabled>
+      <legend>DPI &amp; settings</legend>
+      <div class="row">
+        DPI stages:
+        <input class="dpi" type="number" min="100" max="10000" step="100" />
+        <input class="dpi" type="number" min="100" max="10000" step="100" />
+        <input class="dpi" type="number" min="100" max="10000" step="100" />
+        <input class="dpi" type="number" min="100" max="10000" step="100" />
+        <input class="dpi" type="number" min="100" max="10000" step="100" />
+        <input class="dpi" type="number" min="100" max="10000" step="100" />
+      </div>
+      <div class="row"><label for="activeStage">Active stage:</label> <select id="activeStage"></select></div>
+      <div class="row"><label for="polling">Polling rate:</label> <select id="polling"></select></div>
+      <div class="row"><label><input type="checkbox" id="scrollRev" /> Reverse scroll direction</label></div>
+      <div class="row"><button id="applySettings">Apply to mouse</button></div>
+    </fieldset>
+
+    <fieldset id="profileControls" disabled>
+      <legend>Profile</legend>
+      <button id="exportBtn">Export JSON</button>
+      <label>Import: <input type="file" id="importFile" accept="application/json" /></label>
+    </fieldset>
+
+    <details>
+      <summary>Developer tools</summary>
+      <fieldset id="devControls" disabled>
+        <legend>Raw packet</legend>
+        <input id="raw" type="text" size="60" placeholder="55 0e 01 0b 30" />
+        <button id="send">Send</button>
+        <div class="row"><small>Sends any hex, padded to 64 bytes, on report 0. Replies appear below.</small></div>
+      </fieldset>
+    </details>
 
     <pre id="output">Not connected.</pre>
     <pre id="replies">Replies from mouse will appear here.</pre>
+
+    <p><small>
+      Not affiliated with Cosmic Byte. Button remapping and macros are partially decoded
+      but not yet implemented (need more reverse-engineering).
+    </small></p>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
