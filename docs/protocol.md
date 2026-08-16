@@ -2,7 +2,7 @@
 
 **Status: in progress.** Confirmed findings + open questions, updated as we decode.
 Companion to [`research.md`](research.md). Everything here was observed on the real
-device via WebHID introspection.
+device via WebHID introspection and by sniffing `HIDDevice.sendReport` in Orbit's tab.
 
 ---
 
@@ -11,98 +11,121 @@ device via WebHID introspection.
 - **VID `0xa8a4`, PID `0x2255`**
 - HID product name: `USB MOUSE` (kernel `HID_NAME`: `YJX-CHIP USB MOUSE` — YJX-CHIP is
   the controller/OEM)
-- Tested over **wired USB**. Enumerates as **3 HID interfaces** (`hidraw` nodes); the
-  Chrome device chooser lists selectable interfaces separately.
+- Tested over **wired USB**. Enumerates as **3 HID interfaces**.
 
-## HID interfaces / collections (from WebHID)
-
-### Interface A — composite input (remapped keys → OS)
-| usagePage / usage | meaning | reports |
-|---|---|---|
-| `0x0001` / `0x0006` | Keyboard | (sizes not yet re-measured) |
-| `0x000c` / `0x0001` | Consumer Control | input id 3 |
-| `0x0001` / `0x0080` | System Control | — |
-| `0xff05` / `0x0002` | vendor | input id 10 |
-| `0xff06` / `0x0002` | vendor | input id 11, output id 11 |
-
-Purpose: delivers remapped keyboard/media/system keys to the OS. The vendor
-`0xff05`/`0xff06` collections may be secondary config; **report sizes here were
-captured before the byte-sizing code was finished, so they read as 0 and need
-re-measuring.**
-
-### Interface B — config command channel ✅ (primary target)
-| usagePage / usage | reports |
-|---|---|
-| `0xff01` / `0x0010` | **input id 0 = 64 bytes**, **output id 0 = 64 bytes** |
-
-**This is the command pipe.** Send a 64-byte **output** report, the device replies
-with a 64-byte **input** report. `reportId 0` = unnumbered, so all 64 bytes are
-payload (no leading report-ID byte).
-
-## The config channel (confirmed)
+## Config command channel ✅
 
 - Target interface: `usagePage 0xff01`, `usage 0x0010`.
 - **Send:** output report, `reportId 0`, 64-byte payload — `device.sendReport(0, data)`.
 - **Receive:** input report, `reportId 0`, 64-byte payload — via `device.oninputreport`.
-- **App tip:** filter `requestDevice` to `{ vendorId: 0xa8a4, usagePage: 0xff01 }` so
-  users land on the right interface automatically instead of guessing in the chooser.
+- App tip: filter `requestDevice` to `{ vendorId: 0xa8a4, usagePage: 0xff01 }`.
 
-## Decoded: packet framing
+---
 
-- Every packet is 64 bytes on `reportId 0`. **Byte 0 = `0x55`** (magic/start), all packets.
-- **Byte 1 = command id.** Seen so far: `0x0f` = write DPI config; `0x0e` = a
-  read/status request (constant `55 0e 01 0b 30 00…`) Orbit sends right before each write.
-- **Checksum: not yet determined.** Across DPI *active-stage* changes, byte 2 (`0xae`)
-  stayed constant even though byte 10 changed — so either there's no checksum, or it
-  doesn't cover that byte. Confirm by capturing a change to a DPI *value* (below).
+## Packet framing
 
-## Decoded: DPI configuration — command `0x0f`
+- Every packet is 64 bytes on `reportId 0`. **Byte 0 = `0x55`** (magic/start), always.
+- **Byte 1 = command id.** Pattern: **even = read/status, odd = write.** Each write is
+  preceded by its matching read.
+  | read | write | purpose |
+  |---|---|---|
+  | `0x0e` | `0x0f` | mouse settings (DPI table, active stage, polling, scroll dir) |
+  | `0x08` | `0x09` | button / key mapping |
+  | — | `0x21` | RGB lighting effect |
+- **Bytes 2–4 = a fixed per-command header** (`0f`→`ae 0a 2f`, `09`→`a5 22 2c`,
+  `08`→`01 0b 2c`, `0e`→`01 0b 30`). Constant for a command regardless of payload.
+- **No payload checksum.** Proven: changing payload bytes (button slot `20 02`→`20 08`,
+  scroll `00`→`01`, stage/polling indices) never changed byte 2. **We can build packets
+  by editing payload bytes directly — no checksum to recompute.**
 
-Captured template (64 bytes, `reportId 0`):
+---
+
+## Decoded: mouse settings — write `0x0f` (read `0x0e`)
+
 ```
-55 0f ae 0a 2f 01 01 01 00 01 [AS] [NS] 02 <6× DPI LE16> 00…00 ff 01 0a ff ff 00…
+55 0f ae 0a 2f 01 01 01 00 01 [PR] 06 [AS] <6× DPI LE16> 00…00 [SD] ff 01 0a ff ff 00…
 ```
 | offset | field | notes |
 |---|---|---|
-| 0 | `0x55` | magic |
-| 1 | `0x0f` | command = write DPI config |
-| 2–9 | `ae 0a 2f 01 01 01 00 01` | fixed header (checksum/length? TBD) |
-| **10** | **[AS] active DPI stage** | 1-based; observed 1–4 |
-| **11** | **[NS] stage count** | `0x06` = 6 stages |
-| 12 | `0x02` | unknown (per-stage flag?) |
-| **13–24** | **6 × DPI, little-endian uint16** | `800,1600,2400,3200,6400,10000` |
-| 49–53 | `ff 01 0a ff ff` | unknown trailer (lift-off? terminator?) |
+| 0–9 | `55 0f ae 0a 2f 01 01 01 00 01` | fixed header |
+| **10** | **[PR] polling rate** | 1–4 → likely 125/250/500/1000 Hz *(confirm)* |
+| 11 | `0x06` | DPI stage count (6) |
+| **12** | **[AS] active DPI stage** | 1–6 *(confirm — see note)* |
+| **13–24** | **6 × DPI, little-endian uint16** | default `800,1600,2400,3200,6400,10000` |
+| **48** | **[SD] scroll direction** | `0` = normal, `1` = reversed |
+| 49–53 | `ff 01 0a ff ff` | fixed trailer |
 
-**Actionable now:** set the active DPI stage by replaying this exact template with
-byte 10 changed — no checksum math needed since the rest is byte-identical to a
-known-good Orbit packet.
+> **Disambiguation TODO:** bytes 10 (seen 1–4) and 12 (seen 1–6) are two indices.
+> Byte 12's 1–6 range = the 6 DPI stages → active stage. Byte 10's 1–4 range fits the
+> 4 polling options. Confirm by changing ONLY one control at a time in Orbit.
 
-## Open questions (milestone 2 targets)
+## Decoded: RGB effect — write `0x21`
 
-- Byte layout inside the 64-byte packet: byte 0 = command id? length? checksum/CRC?
-- Command opcodes for: **read firmware/info, set DPI stage, set polling, set RGB
-  (effect/color/speed/brightness), remap button, read/write macro, lift-off/debounce,
-  read/write profile**.
-- Which interface Orbit actually drives for config (likely `0xff01`; confirm vs
-  `0xff05`/`0xff06`).
-- Re-measure `0xff05` / `0xff06` report sizes with the fixed code.
-- A safe "read info" command to prove two-way comms **without risk of a bad write**.
+```
+55 21 00 00 03 00…00 [FX] 00…
+```
+| offset | field | notes |
+|---|---|---|
+| 1 | `0x21` | command = set lighting |
+| 4 | `0x03` | constant — likely a fixed brightness/speed Orbit doesn't expose |
+| **10** | **[FX] effect id** | `0`=wave, `1`=neon, `2`=touring flash, `3`=yoyo ball, `4`=unidirectional flashing, `5`=circular breathing, `6`=off |
+
+Orbit sends **no color and no brightness** — only the effect id. Whether the firmware
+honors custom color/brightness in the spare/zero bytes (incl. byte 4) is an **open
+probe** — see "Custom RGB" in open questions. This is the key lever for the
+"more customization than Orbit" goal.
+
+## Decoded: button / key mapping — write `0x09` (read `0x08`)
+
+```
+55 09 a5 22 2c 00 00 00 <8× 4-byte action entries starting at offset 8>
+```
+Each physical button = one 4-byte entry: `[TYPE] [CODE] [MOD] 00`.
+- `TYPE 0x20` = **mouse button**, `CODE` = bitmask: `01`=L, `02`=R, `04`=M, `08`=back, `10`=forward.
+- `TYPE 0x21` = **keyboard key**, `CODE` = HID keycode, `MOD` = modifier byte.
+
+Observed default table:
+```
+slot0  20 01 00 00   left click
+slot1  20 02 00 00   right click
+slot2  20 04 00 00   middle click
+slot3  20 08 00 00   back      (remap capture changed this 20 02 → 20 08)
+slot4  20 10 00 00   forward
+slot5  21 55 00 00   keyboard key 0x55
+slot6  21 38 01 00   keyboard key 0x38 + modifier 0x01
+```
+To remap a button: overwrite its slot's 4 bytes with the desired `TYPE/CODE/MOD`.
+
+---
+
+## Open questions (next targets)
+
+- **Confirm byte 10 = polling, byte 12 = active DPI stage** (isolated captures).
+- **Custom RGB (the big one):** does the firmware honor color + brightness bytes the
+  `0x21` packet doesn't currently use? Orbit exposes neither. Probe by sending `0x21`
+  with candidate color/brightness bytes and watching the LEDs. Also test whether byte 4
+  (`0x03`) is a brightness/speed level we can vary. If the firmware only supports the 7
+  fixed presets, custom color can't be faked in software.
+- Map each **physical button** to its slot index (which slot is the back button, etc.).
+- Full **keyboard TYPE `0x21`** codes + modifier semantics (for key remaps & macros).
+- **Macro** command (not yet captured).
+- **Lift-off distance / debounce** commands (not yet captured).
+- Meaning of the `ff 01 0a ff ff` trailer and the fixed per-command header bytes.
 
 ## Method (safety first)
 
-1. **Primary:** read the official **Orbit** JS bundle — it builds these exact 64-byte
-   packets; copy the byte layout. Safe, no writes to the device.
-2. **Secondary:** diff the live 64-byte input/output on our device while toggling one
-   setting at a time in Orbit.
-3. **Never** fire unknown opcodes at the device blindly — risk of bad writes / bricking.
+1. Sniff Orbit via `HIDDevice.sendReport` wrapper (safe — Orbit does the writing).
+2. Change ONE setting at a time; diff packets.
+3. For features Orbit lacks (custom color/brightness), probe **from our app** with
+   careful single writes and observe. RGB writes are low-risk; never guess firmware
+   commands.
 
 ## Findings log
 
-- **2026-08-16** — Identified the config channel: interface `0xff01`/`0x0010`, paired
-  64-byte input+output reports at `reportId 0`. Confirmed VID/PID `a8a4`/`2255`,
-  controller YJX-CHIP. WebHID connect working on NixOS after a `GROUP="users"` udev
-  rule (`uaccess` from `99-local.rules` was too late to apply).
-- **2026-08-16** — Decoded DPI command `0x0f` by sniffing `HIDDevice.sendReport` in
-  Orbit's tab. DPI stages are 6× little-endian uint16 (800/1600/2400/3200/6400/10000);
-  byte 10 = active stage, byte 11 = stage count. Packet framing: 64B, byte 0 `0x55`,
-  byte 1 = command id (`0x0f` write DPI, `0x0e` read/status). Checksum still unknown.
+- **2026-08-16** — WebHID connect working on NixOS (udev `GROUP="users"` rule; `uaccess`
+  from `99-local.rules` too late). Config channel = `0xff01`, 64B in/out at `reportId 0`.
+- **2026-08-16** — Sniffed Orbit; decoded **DPI table** (6× LE16), **scroll direction**
+  (byte 48), **RGB effect** (cmd `0x21`, byte 10 = effect 0–6), **button map** (cmd
+  `0x09`, 4-byte entries; `0x20` mouse / `0x21` key). **Confirmed no payload checksum** —
+  byte 2 is a fixed per-command header. Opcode pattern: even=read, odd=write.
+  Orbit exposes no RGB color/brightness → candidate for our custom features.
